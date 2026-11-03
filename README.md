@@ -14,7 +14,7 @@
   <a href="https://github.com/jonah791/dsh-agent-skill-lifecycle"><img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version"></a>
   <img src="https://img.shields.io/badge/License-MIT-green" alt="license">
   <img src="https://img.shields.io/badge/TypeScript-3178C6" alt="TypeScript">
-  <img src="https://img.shields.io/badge/tests-45%20passed-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-46%20passed-brightgreen" alt="tests">
 </p>
 
 **一句话**：给技能库一个**生命周期台账**——用 Beta 后验 η 记录「哪个技能真好用」，并维护 candidate / active / archived 三态流转。
