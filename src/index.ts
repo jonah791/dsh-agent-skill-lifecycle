@@ -108,6 +108,8 @@ interface EntryView {
   loadFailures: number
   lastUsedAt?: string
   missing?: boolean
+  /** 旧名合并去向（只在 `missing` 的旧名上有意义）。 */
+  mergedInto?: string
 }
 
 function viewOf(name: string, entry: SkillEntry): EntryView {
@@ -122,6 +124,7 @@ function viewOf(name: string, entry: SkillEntry): EntryView {
   }
   if (entry.lastUsedAt !== null) view.lastUsedAt = entry.lastUsedAt
   if (entry.missing === true) view.missing = true
+  if (entry.mergedInto !== undefined && entry.mergedInto !== '') view.mergedInto = entry.mergedInto
   return view
 }
 
@@ -182,6 +185,9 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           action: { type: 'string', required: true },
           total: { type: 'number', required: true },
+          present: { type: 'number', required: true },
+          merged: { type: 'number', required: true },
+          unknownOrigin: { type: 'number', required: true },
           candidate: { type: 'number', required: true },
           active: { type: 'number', required: true },
           archived: { type: 'number', required: true },
@@ -203,6 +209,7 @@ export function apply(ctx: Context, config: Config): void {
                 loadFailures: { type: 'number', required: true },
                 lastUsedAt: { type: 'string' },
                 missing: { type: 'boolean' },
+                mergedInto: { type: 'string' },
               },
             },
           },
@@ -210,12 +217,21 @@ export function apply(ctx: Context, config: Config): void {
         },
       },
       render: (_args, value: any) => {
-        const head = `技能生命周期 · 共 ${value.total}｜candidate ${value.candidate} / active ${value.active} / archived ${value.archived}`
-          + `｜从未使用 ${value.neverUsed}｜目录缺失 ${value.missing}`
+        // ★ 读数分块（2026-11-03）：幽灵条目**不再混进主计数**。
+        //   修前 `共 221｜candidate 220｜从未使用 167` 读起来像「我有 220 个候选技能、
+        //   其中 167 个从没用过」；实际在场只有 29 个、未使用 25 个——另外 192 条是
+        //   技能库从 194 个合并成 29 个集群时留下的旧名。它们**不是垃圾**（历史就写在这），
+        //   但也不是「候选技能」，混在一起会让「哪些技能该复核」这个判断从根上失准。
+        const head = `技能生命周期 · 共 ${value.total}`
+          + `｜**在场 ${value.present}**（candidate ${value.candidate} / active ${value.active} / archived ${value.archived}）`
+          + `｜已合并旧名 ${value.merged}｜来源不明 ${value.unknownOrigin}`
+          + `｜在场未使用 ${value.neverUsed}｜目录缺失 ${value.missing}`
         const rows = (value.entries as EntryView[]).map(
           (e) => `• ${e.name} [${e.status}] η=${e.eta} trials ${e.passed}/${e.attempted} uses=${e.uses}`
             + (e.loadFailures > 0 ? ` 加载失败=${e.loadFailures}` : '')
-            + (e.missing ? ' (missing)' : ''),
+            + (e.missing
+              ? (e.mergedInto !== undefined ? ` → 已并入 ${e.mergedInto}` : ' (missing·来源不明)')
+              : ''),
         )
         return [{ type: 'text', text: [head, ...rows, value.note].join('\n') }]
       },
@@ -302,6 +318,9 @@ export function apply(ctx: Context, config: Config): void {
       return {
         action,
         total: summary.total,
+        present: summary.present,
+        merged: summary.merged,
+        unknownOrigin: summary.unknownOrigin,
         candidate: summary.byStatus.candidate,
         active: summary.byStatus.active,
         archived: summary.byStatus.archived,

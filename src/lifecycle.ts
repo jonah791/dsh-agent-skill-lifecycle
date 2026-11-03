@@ -40,6 +40,19 @@ export interface SkillEntry {
   lastUsedAt: string | null
   /** Directory no longer holds this skill; kept for the record, never deleted. */
   missing?: boolean
+  /**
+   * 旧名合并去向：这条技能被合并进了哪个集群技能（2026-11-03 加）。
+   *
+   * 为什么需要它：技能库从 194 个合并成 29 个集群后，旧名全部变成 `missing`
+   * ——台账里 221 条有 192 条是这种。它们**不是被淘汰**，是**换了住处**
+   * （`references/<旧名>/index.md`）。没有这个字段时，台账只能表达
+   * 「目录没了」，表达不了「去哪了」，于是 191 条旧名与「真该删的技能」长得一样。
+   *
+   * 值从技能库结构反查得出（`<集群>/references/<旧名>/` 存在 ⇒ mergedInto=集群），
+   * 实测命中 191/192 = 99.5%（2026-11-03）。查不到的那条不猜，留空并计入
+   * `unknownOrigin` 显形——**「不知道去哪」与「合并了」必须可区分**。
+   */
+  mergedInto?: string
 }
 
 export interface SkillLedger {
@@ -277,31 +290,67 @@ export function syncNames(
 
 /** Read-only roll-up for the `list` action's header. */
 export interface LedgerSummary {
+  /** 全部条目，含已合并旧名与来源不明的。 */
   total: number
+  /** 目录还在的（真正在场的技能）。 */
+  present: number
+  /** 已合并进某个集群的旧名（`missing` 且有 `mergedInto`）。 */
+  merged: number
+  /** `missing` 但不知道合并去哪的——**需人看**，不猜。 */
+  unknownOrigin: number
+  /** 只统计**在场的**。 */
   byStatus: Record<SkillStatus, number>
+  /** 只统计在场的。 */
   neverUsed: number
+  /** = `merged + unknownOrigin`（保留此字段名以兼容既有输出 schema）。 */
   missingCount: number
+  /** 只统计在场的。 */
   lowEta: number
 }
 
 /**
  * Summarise a ledger.
+ *
+ * ★ **口径（2026-11-03 修）**：`missing` 的条目**不进入** `byStatus` / `neverUsed` /
+ * `lowEta`——它们目录已不在，把它们算进「我有多少候选技能」「有多少从未使用」
+ * 会让读数与事实差一个数量级（实测：全场报 neverUsed **167**，在场真实值 **25**）。
+ *
+ * 但也**不能当它们不存在**：192 条旧名是技能库从 194 合并到 29 的真实历史，
+ * 所以分开计数并各自显形——`merged`（知道去处）与 `unknownOrigin`（不知道去处）
+ * 必须可区分，否则「已合并」与「来源不明」又会被读成同一个数。
+ *
  * @param ledger - Ledger to read.
  * @param lowEtaThreshold - η below which a skill counts as "low".
  * @returns Counts per status plus attention figures.
  */
 export function summarize(ledger: SkillLedger, lowEtaThreshold = 0.5): LedgerSummary {
   const byStatus: Record<SkillStatus, number> = { candidate: 0, active: 0, archived: 0 }
+  let present = 0
+  let merged = 0
+  let unknownOrigin = 0
   let neverUsed = 0
-  let missingCount = 0
   let lowEta = 0
   for (const entry of Object.values(ledger.skills)) {
+    if (entry.missing === true) {
+      if (entry.mergedInto !== undefined && entry.mergedInto !== '') merged += 1
+      else unknownOrigin += 1
+      continue
+    }
+    present += 1
     byStatus[entry.status] += 1
     if (entry.uses === 0) neverUsed += 1
-    if (entry.missing === true) missingCount += 1
     if (entry.eta < lowEtaThreshold) lowEta += 1
   }
-  return { total: Object.keys(ledger.skills).length, byStatus, neverUsed, missingCount, lowEta }
+  return {
+    total: Object.keys(ledger.skills).length,
+    present,
+    merged,
+    unknownOrigin,
+    byStatus,
+    neverUsed,
+    missingCount: merged + unknownOrigin,
+    lowEta,
+  }
 }
 
 // ── 续更候选（RSI mode = Offline→Online 的入口 · 域图 P5） ──────────────────

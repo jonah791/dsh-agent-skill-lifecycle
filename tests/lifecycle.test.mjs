@@ -160,12 +160,77 @@ describe('summarize · 读数', () => {
     let ledger = syncNames(emptyLedger(NOW), ['a', 'b', 'c'], NOW).ledger
     for (let i = 0; i < 3; i += 1) ledger = recordTrial(ledger, 'a', true, NOW).ledger
     ledger = markUsed(ledger, 'a', NOW).ledger
-    ledger = syncNames(ledger, ['a', 'c'], NOW).ledger
+    ledger = syncNames(ledger, ['a', 'c'], NOW).ledger   // b 消失 ⇒ missing
     const s = summarize(ledger)
     assert.equal(s.total, 3)
-    assert.equal(s.byStatus.active, 1)
-    assert.equal(s.byStatus.candidate, 2)
+    // ★ 2026-11-03 口径修正：下面四个期望值**变了**，翻转原因逐条写明（不是「跟着实现改数」）。
+    //   旧断言：byStatus.candidate === 2（b + missing 的 c）、neverUsed === 2（b + missing 的 c）。
+    //   病症：`c` 目录已不在，却仍被算进「我有多少候选技能」「多少从未使用」——
+    //   实测放大到 221 条台账上就是 candidate 220 vs 真实 29、neverUsed 167 vs 真实 25（差 6.7 倍）。
+    //   新口径：missing 的条目**不进** byStatus / neverUsed / lowEta，改由 merged / unknownOrigin 单独计数。
+    assert.equal(s.present, 2, '在场只有 a 和 c（b 目录已缺失）')
+    assert.equal(s.byStatus.active, 1, 'a 已毕业')
+    assert.equal(s.byStatus.candidate, 1, '**只剩在场未毕业的 c**；missing 的 b 不算候选')
+    assert.equal(s.missingCount, 1, '= merged + unknownOrigin')
+    assert.equal(s.neverUsed, 1, '**只有在场且 uses=0 的 c**；missing 的 b 不算「从未使用」')
+  })
+
+  test('★ 尸体：missing 且无 mergedInto ⇒ 计入 unknownOrigin，不计 merged', () => {
+    const ledger = {
+      version: 1,
+      updatedAt: NOW,
+      skills: {
+        'old-name': {
+          status: 'candidate', eta: 0.5, trials: { attempted: 0, passed: 0 }, uses: 9,
+          source: 'scan', createdAt: NOW, lastUsedAt: null, missing: true,
+        },
+      },
+    }
+    const s = summarize(ledger)
+    assert.equal(s.total, 1)
+    assert.equal(s.present, 0)
+    assert.equal(s.merged, 0)
+    assert.equal(s.unknownOrigin, 1, '**不知道去处**必须与「已合并」分开报——两者修法完全不同')
     assert.equal(s.missingCount, 1)
-    assert.equal(s.neverUsed, 2)
+    assert.equal(s.neverUsed, 0, '幽灵的 uses=0 不算「从未使用」')
+    assert.equal(s.byStatus.candidate, 0, '幽灵不进状态计数')
+  })
+
+  test('★ merged 与 unknownOrigin 可区分，且 missingCount = 两者之和', () => {
+    const base = {
+      status: 'candidate', eta: 0.5, trials: { attempted: 0, passed: 0 }, uses: 0,
+      source: 'scan', createdAt: NOW, lastUsedAt: null,
+    }
+    const ledger = {
+      version: 1,
+      updatedAt: NOW,
+      skills: {
+        alive: { ...base },
+        'ghost-merged': { ...base, missing: true, mergedInto: 'engineering-core' },
+        'ghost-merged-2': { ...base, missing: true, mergedInto: 'ops-management' },
+        'ghost-unknown': { ...base, missing: true },
+      },
+    }
+    const s = summarize(ledger)
+    assert.equal(s.total, 4)
+    assert.equal(s.present, 1, '只有 alive 在场')
+    assert.equal(s.merged, 2)
+    assert.equal(s.unknownOrigin, 1)
+    assert.equal(s.missingCount, 3, 'merged + unknownOrigin')
+    assert.equal(s.byStatus.candidate, 1, '状态计数只含在场的 alive')
+    assert.equal(s.neverUsed, 1, '只含在场的 alive')
+  })
+
+  test('回归：没有幽灵时读数与修前完全一致', () => {
+    let ledger = syncNames(emptyLedger(NOW), ['x', 'y'], NOW).ledger
+    ledger = markUsed(ledger, 'x', NOW).ledger
+    const s = summarize(ledger)
+    assert.equal(s.total, 2)
+    assert.equal(s.present, 2)
+    assert.equal(s.merged, 0)
+    assert.equal(s.unknownOrigin, 0)
+    assert.equal(s.missingCount, 0)
+    assert.equal(s.byStatus.candidate, 2)
+    assert.equal(s.neverUsed, 1)
   })
 })
