@@ -122,6 +122,18 @@ describe('L3 · sync 对账', () => {
     assert.deepEqual(second.added, [])
     assert.equal(Object.keys(second.ledger.skills).length, 1)
   })
+
+  test('sync 无变化时返回**同一引用**（shell 层据此免写盘）', () => {
+    const ledger = syncNames(emptyLedger(NOW), ['a'], NOW).ledger
+    const again = syncNames(ledger, ['a'], NOW)
+    assert.equal(again.added.length, 0)
+    assert.equal(again.missing.length, 0)
+    assert.equal(again.revived.length, 0)
+    // 承重假设：`list` 自动 sync 的分支用 `synced.ledger !== ledger` 决定要不要 saveLedger。
+    // 若这里返回新对象，每次 list 都会白写盘，并把 updatedAt 一直推后
+    // ⇒「台账最后一次变动是什么时候」这个读数会永久失真（永远显示刚才）。
+    assert.equal(again.ledger, ledger, '无变化时必须返回同一对象引用，否则每次 list 都会白写盘')
+  })
 })
 
 describe('markUsed · 使用观测', () => {

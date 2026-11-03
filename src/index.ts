@@ -260,6 +260,23 @@ export function apply(ctx: Context, config: Config): void {
         }
       } else if (action !== 'list') {
         note = `未知 action「${action}」——按 list 处理（未改动台账）。`
+      } else {
+        // list：**读前自动 sync**（幂等）。
+        // 为什么必须自动：`missing` 只在 sync 时写 ⇒ 不 sync 时它是**假读数**（"目录缺失 0" ≠ 没缺失，
+        // 实测 2026-11-02：台账 195 条报 missing=0，真实目录只有 29 个）；而 `renewalCandidates`
+        // 用 `if (entry.missing === true) continue` 跳过幽灵 ⇒ 未标 missing 的幽灵**全进候选**，
+        // 132 条「该给一次 trial」全报在已合并掉的旧名上（读起来像待办，实际无从下手）。
+        // 成本：扫一遍技能目录（本机 29 个），远低于一次误判的代价。
+        // ⚠ 引用不变 = 无变化，不写盘（`syncNames` 无改动时返回同一个对象）。
+        const names = scanSkillNames(roots())
+        const synced = syncNames(ledger, names, now(), policy)
+        if (synced.ledger !== ledger) {
+          ledger = synced.ledger
+          saveLedger(ledgerPath, ledger)
+        }
+        note = `（读前已自动同步目录：${String(names.length)} 个技能，新增 ${String(synced.added.length)}、`
+          + `回归 ${String(synced.revived.length)}、目录缺失 ${String(synced.missing.length)}）`
+          + '\n⚠ `missing` 是**目录层事实**，不等于技能没了——合并前的旧名也在这里。'
       }
 
       const summary = summarize(ledger)
